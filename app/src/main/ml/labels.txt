@@ -1,0 +1,2 @@
+0 Non - Accident 
+1 Accident
