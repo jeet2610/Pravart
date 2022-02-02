@@ -69,7 +69,7 @@ public class HomeFragment extends Fragment {
     private static final int CAMERA_REQUEST = 1888;
 
     private static final int MY_CAMERA_PERMISSION_CODE = 100;
-    public String result = "camera on ";
+    public String result = "camera ON ";
 
     private HomeViewModel homeViewModel;
 
