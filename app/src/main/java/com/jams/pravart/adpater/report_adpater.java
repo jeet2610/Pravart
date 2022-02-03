@@ -31,6 +31,7 @@ public class report_adpater extends  FirestoreRecyclerAdapter<report_model,repor
         Picasso.get()
                 .load(model.getImage())
                 .into(holder.acc_image);
+
     }
 
     @NonNull

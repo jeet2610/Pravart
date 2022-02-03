@@ -1,10 +1,13 @@
 package com.jams.pravart.ui.home;
 
+import static com.firebase.ui.auth.ui.email.CheckEmailFragment.TAG;
+
 import android.Manifest;
 import android.app.Activity;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentSender;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -15,6 +18,7 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Looper;
 import android.provider.MediaStore;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -28,11 +32,21 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
 
+import com.google.android.gms.common.api.ApiException;
+import com.google.android.gms.common.api.ResolvableApiException;
 import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
 import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.LocationSettingsRequest;
+import com.google.android.gms.location.LocationSettingsResponse;
+import com.google.android.gms.location.LocationSettingsStatusCodes;
+import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
@@ -60,6 +74,7 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.sql.Timestamp;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
@@ -67,8 +82,11 @@ public class HomeFragment extends Fragment {
 
 
     private static final int CAMERA_REQUEST = 1888;
+    private static final int CAMERA_PERMISSION_CODE = 100;
+    private static final int ACCESS_FINE_LOCATION = 34;
 
-    private static final int MY_CAMERA_PERMISSION_CODE = 100;
+
+
     public String result = "camera ON ";
 
     private HomeViewModel homeViewModel;
@@ -87,7 +105,8 @@ public class HomeFragment extends Fragment {
 
     URL url;
 
-    String Location = "3,amit soc , near pt college";
+    String Location = "";
+    private LocationRequest locationRequest;
 
     LocationManager locationManager;
 
@@ -108,9 +127,10 @@ public class HomeFragment extends Fragment {
 
 
 
+
     DatabaseReference databaseReference = FirebaseDatabase.getInstance().getReference("images");
     StorageReference storageReference = FirebaseStorage.getInstance().getReference();
-    StorageReference imagesRef = storageReference.child("image.jpg");
+
 
     byte[] datab;
 
@@ -128,6 +148,11 @@ public class HomeFragment extends Fragment {
 
         locationManager = (LocationManager) getActivity().getSystemService(Context.LOCATION_SERVICE);
 
+        locationRequest = LocationRequest.create();
+        locationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+        locationRequest.setInterval(5000);
+        locationRequest.setFastestInterval(2000);
+
 
         //      final TextView textView = root.findViewById(R.id.text_home);
 
@@ -143,8 +168,11 @@ public class HomeFragment extends Fragment {
         emergencyButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-                getActivity().startActivityFromFragment(HomeFragment.this, cameraIntent, CAMERA_REQUEST);
+
+                checkPermission(Manifest.permission.CAMERA, CAMERA_PERMISSION_CODE);
+                checkPermission(Manifest.permission.ACCESS_FINE_LOCATION,ACCESS_FINE_LOCATION);
+
+
 
 
             }
@@ -154,6 +182,31 @@ public class HomeFragment extends Fragment {
     }
 
 
+    public void checkPermission(String permission, int requestCode)
+    {
+        if(requestCode == CAMERA_PERMISSION_CODE) {
+            if (ContextCompat.checkSelfPermission(getActivity(), permission) == PackageManager.PERMISSION_DENIED) {
+
+                // Requesting the permission
+                ActivityCompat.requestPermissions(getActivity(), new String[]{permission}, requestCode);
+            } else {
+                Toast.makeText(getActivity(), "Permission already granted", Toast.LENGTH_SHORT).show();
+                Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                getActivity().startActivityFromFragment(HomeFragment.this, cameraIntent, CAMERA_REQUEST);
+            }
+
+
+        }
+        if (requestCode==ACCESS_FINE_LOCATION){
+            if (ContextCompat.checkSelfPermission(getActivity(), permission) == PackageManager.PERMISSION_DENIED) {
+
+                // Requesting the permission
+                ActivityCompat.requestPermissions(getActivity(), new String[]{permission}, requestCode);
+            } else {
+                Log.d("Allowed", "checkPermission: location");
+            }
+        }
+    }
 
 
 
@@ -183,6 +236,7 @@ public class HomeFragment extends Fragment {
                 }
             }
         } catch (Exception e) {
+            Log.d("eerror", "onActivityResult: "+e.getLocalizedMessage());
             Toast.makeText(this.getActivity(), e + "Something went wrong", Toast.LENGTH_LONG).show();
         }
     }
@@ -196,8 +250,11 @@ public class HomeFragment extends Fragment {
 
 
     public void imageclassify(Bitmap bitmap) {
-
+        Timestamp timestamp = new Timestamp(System.currentTimeMillis());
+        Log.d("Time", "imageclassify: "+timestamp.toString().trim());
+        StorageReference imagesRef = storageReference.child(timestamp.toString().trim());
         try {
+            getCurrentLocation();
             Model model = Model.newInstance(this.requireActivity());
 
 
@@ -241,7 +298,8 @@ public class HomeFragment extends Fragment {
 
 
 
-            if(classes[maxPos]=="Accident"){
+            if(classes[maxPos].equals("Accident")){
+
 
                 UploadTask uploadTask = imagesRef.putBytes(datab);
                 uploadTask.addOnFailureListener(exception -> {
@@ -259,35 +317,36 @@ public class HomeFragment extends Fragment {
                         public void onSuccess(Uri uri) {
                             photoStringLink = uri.toString();
                             Log.d("image url "," "+photoStringLink);
+
+                            CollectionReference dbCourses = db.collection("report");
+                            Log.d("lcoation", "imageclassify: "+Location);
+                            if(photoStringLink  !=null && Location != null) {
+                                report_model rm = new report_model(photoStringLink, Location);
+
+
+                                dbCourses.add(rm).addOnSuccessListener(documentReference -> {
+                                    // after the data addition is successful
+                                    // we are displaying a success toast message.
+
+                                    Log.d("firestore final  ", "onSuccess: data is added");
+
+
+                                    Toast.makeText(getActivity(), "Your data has been added to Firebase Firestore", Toast.LENGTH_SHORT).show();
+                                }).addOnFailureListener(e -> {
+                                    // this method is called when the data addition process is failed.
+                                    // displaying a toast message when data addition is failed.
+                                    Log.d("firestore error ", "ONFAILURE: data is NOT ADDED" + e.getLocalizedMessage());
+                                    Toast.makeText(getActivity(), "Fail to add data \n" + e, Toast.LENGTH_SHORT).show();
+                                });
+                            }else{
+                                Toast.makeText(getContext(), "noData found", Toast.LENGTH_SHORT).show();
+                            }
                         }
                     });
                 });
 
-                if(photoStringLink == null){
-                    wait(9000);
-                }
-
-                CollectionReference dbCourses = db.collection("report");
-
-                report_model rm = new report_model(photoStringLink, Location);
 
 
-
-                dbCourses.add(rm).addOnSuccessListener(documentReference -> {
-                    // after the data addition is successful
-                    // we are displaying a success toast message.
-
-                    Log.d("firestore final  ", "onSuccess: data is added");
-
-
-
-                    Toast.makeText(getActivity(), "Your data has been added to Firebase Firestore", Toast.LENGTH_SHORT).show();
-                }).addOnFailureListener(e -> {
-                    // this method is called when the data addition process is failed.
-                    // displaying a toast message when data addition is failed.
-                    Log.d("firestore error ", "onSuccess: data is added");
-                    Toast.makeText(getActivity(), "Fail to add data \n" + e, Toast.LENGTH_SHORT).show();
-                });
 
             }
 
@@ -295,12 +354,97 @@ public class HomeFragment extends Fragment {
 
             // Releases model resources if no longer used.
             model.close();
-        } catch (IOException | InterruptedException e) {
-            // TODO Handle the exception
+        } catch (Exception e) {
+            Log.d("Error", "imageclassify: "+e.getLocalizedMessage());
         }
 
     }
 
+    private void getCurrentLocation() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (ActivityCompat.checkSelfPermission(getActivity(), Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+
+                if (isGPSEnabled()) {
+
+                    LocationServices.getFusedLocationProviderClient(getActivity())
+                            .requestLocationUpdates(locationRequest, new LocationCallback() {
+                                @Override
+                                public void onLocationResult(@NonNull LocationResult locationResult) {
+                                    super.onLocationResult(locationResult);
+
+                                    LocationServices.getFusedLocationProviderClient(getActivity())
+                                            .removeLocationUpdates(this);
+
+                                    if (locationResult.getLocations().size() >0){
+
+                                        int index = locationResult.getLocations().size() - 1;
+                                        double latitude = locationResult.getLocations().get(index).getLatitude();
+                                        double longitude = locationResult.getLocations().get(index).getLongitude();
+
+                                        Log.d("map", "onLocationResult: "+locationResult.getLocations());
+                                        Location = "https://maps.google.com/?q="+latitude+","+longitude;
+                                    }
+                                }
+                            }, Looper.getMainLooper());
+
+                } else {
+                    turnOnGPS();
+                }
+
+            } else {
+                requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
+            }
+        }
+    }
+
+    private boolean isGPSEnabled() {
+        LocationManager locationManager = null;
+        boolean isEnabled = false;
+
+        locationManager = (LocationManager) getActivity().getSystemService(Context.LOCATION_SERVICE);
+
+        isEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+        return isEnabled;
+
+    }
+
+    private void turnOnGPS() {
+        LocationSettingsRequest.Builder builder = new LocationSettingsRequest.Builder()
+                .addLocationRequest(locationRequest);
+        builder.setAlwaysShow(true);
+
+        Task<LocationSettingsResponse> result = LocationServices.getSettingsClient(getActivity())
+                .checkLocationSettings(builder.build());
+
+        result.addOnCompleteListener(new OnCompleteListener<LocationSettingsResponse>() {
+            @Override
+            public void onComplete(@NonNull Task<LocationSettingsResponse> task) {
+
+                try {
+                    LocationSettingsResponse response = task.getResult(ApiException.class);
+                    Toast.makeText(getContext(), "GPS is already tured on", Toast.LENGTH_SHORT).show();
+
+                } catch (ApiException e) {
+
+                    switch (e.getStatusCode()) {
+                        case LocationSettingsStatusCodes.RESOLUTION_REQUIRED:
+
+                            try {
+                                ResolvableApiException resolvableApiException = (ResolvableApiException) e;
+                                resolvableApiException.startResolutionForResult(getActivity(), 2);
+                            } catch (IntentSender.SendIntentException ex) {
+                                ex.printStackTrace();
+                            }
+                            break;
+
+                        case LocationSettingsStatusCodes.SETTINGS_CHANGE_UNAVAILABLE:
+                            //Device does not have location
+                            break;
+                    }
+                }
+            }
+        });
+    }
 
 
 }

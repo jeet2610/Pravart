@@ -45,7 +45,7 @@ public class DashboardFragment extends Fragment {
        firebaseFirestore = FirebaseFirestore.getInstance();
 
 
-        Query query = firebaseFirestore.collection("report");
+        Query query = firebaseFirestore.collection("report").orderBy("timestamp");
         //adapter
         FirestoreRecyclerOptions<report_model> option = new FirestoreRecyclerOptions.Builder<report_model>()
                 .setQuery(query,report_model.class)
